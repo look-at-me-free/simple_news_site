@@ -1,5 +1,35 @@
 {
-  "generated_utc": "2026-03-20T03:12:08.370Z",
-  "gallery_count": 0,
-  "galleries": []
+  "generated_utc": "2026-03-20T03:23:26.994Z",
+  "gallery_count": 1,
+  "galleries": [
+    {
+      "slug": "article-screenshots",
+      "title": "Article Screenshots",
+      "source": "uploaded_directories/article_screenshots.json",
+      "generated_from_filename": "article_screenshots.json",
+      "image_count": 19,
+      "total_files": 19,
+      "links": [
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Before%20Mass%20Media/screencapture-msn-en-us-news-crime-school-secretary-accused-of-abuse-now-on-the-run-ar-AA1YZaS8-2026-03-19-21_04_25.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Crimes%20Only%20Possible%20Now/screencapture-msn-en-us-news-crime-upstate-ny-man-pleads-guilty-to-cyberstalking-after-making-threats-to-relative-.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Everyone%20Hates%20Them/screencapture-msn-en-us-news-politics-maga-governor-booted-from-restaurant-by-her-own-constituents-ar-AA1Z0cil-2026-03-19-21_14_43.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Greatness%20walks%20in%20our%20Midst/screencapture-msn-en-us-news-insight-angel-reese-hails-record-wnba-pay-jump-gm-GMF192025D-2026-03-19-21_11_59.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Misc/screencapture-msn-en-us-money-other-the-metaverse-was-a-100-billion-flop-it-should-make-us-think-twice-about-ai-predictions-ar-AA1Z0nN9-2026-03-19-21_03_07.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Misc/screencapture-msn-en-us-news-insight-keith-urban-reeling-over-kidman-baker-romance-gm-GM9403FE1E-2026-03-19-21_00_07.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Misc/screencapture-msn-en-us-news-insight-unredacted-email-challenges-trump-s-epstein-claim-gm-GMA38F7A77-2026-03-19-20_56_34.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Misc/screencapture-msn-en-us-news-opinion-dept-of-education-quietly-yanks-charlie-kirk-banner-after-people-notice-it-exists-ar-AA1YZClq-2026-03-19-21_20_14.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Misc/screencapture-msn-en-us-news-politics-donald-trump-threatens-new-war-with-china-over-flirty-skater-skirts-ar-AA1YYMz6-2026-03-19-20_58_49.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Misc/screencapture-msn-en-us-news-us-judge-denies-asylum-claim-of-family-of-liam-ramos-the-5-year-old-boy-taken-by-ice-with-his-father-in-minnesota-lawyer-says-ar-AA1Z0HkO-2026-03-19-21_00_41.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Misc/screencapture-msn-en-us-news-us-the-chilling-rise-of-the-alpine-divorce-where-men-take-their-wives-to-hike-then-purposefully-abandon-them-ar-AA1YQVz9-2026-03-19-21_18_.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Monstrosity%20Has%20No%20Skin%20Color/screencapture-msn-en-us-news-crime-dad-shoots-newborn-daughter-in-head-and-leaves-her-to-die-in-snow-filled-tree-gets-life-sentence-ar-AA1YZ7CY-2026-03-19-21_06_12.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Monstrosity%20Has%20No%20Skin%20Color/screencapture-msn-en-us-news-crime-doctor-on-trial-for-allegedly-trying-to-kill-wife-on-hawaii-hiking-trail-ar-AA1YZLQ6-2026-03-19-21_02_38.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Monstrosity%20Has%20No%20Skin%20Color/screencapture-msn-en-us-news-world-handyman-jailed-for-murdering-customer-with-scissors-ar-AA1YZJ7u-2026-03-19-20_43_42.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/News%20On%20ICE/screencapture-msn-en-us-news-insight-judges-blast-ice-over-unlawful-arrests-gm-GM3CC1AF63-2026-03-19-21_10_28.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Shadow%20Dictatorship/screencapture-msn-en-us-news-politics-2-ex-fbi-agents-say-in-a-lawsuit-they-were-fired-for-their-roles-in-trump-election-investigation-ar-AA1Z0SXR-2026-03.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/The%20Times/screencapture-msn-en-us-news-crime-dj-mustard-scores-big-in-court-takes-control-of-kids-school-decisions-over-ex-wife-ar-AA1YRk8B-2026-03-19-21.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/Things%20Change/screencapture-msn-en-us-sports-nfl-new-orleans-saints-cornerback-isaac-yiadom-and-influencer-savannah-montano-are-engaged-after-dream-proposal-exclusive-ar-.png",
+        "https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots/World%20Changing/screencapture-msn-en-us-news-opinion-netanyahu-the-west-must-be-strong-to-survive-jesus-christ-has-no-advantage-over-genghis-khan-ar-AA1Z0BVr-2026-03-19-21_09_29.png"
+      ]
+    }
+  ]
 }
