@@ -1,225 +1,169 @@
-<#
-R2 schema + links generator
+name: Build gallery index
 
-What this does
---------------
-Scans a local folder and generates a JSON file that includes:
-- links: a flat array of all public file URLs
-- files: a flat array of file objects with name, relative path, and URL
-- tree: a nested folder structure showing what files are where
+on:
+  push:
+    paths:
+      - 'uploaded_directories/**/*.json'
+      - '.github/workflows/build-gallery-index.yml'
+  workflow_dispatch:
 
-What it prompts for
--------------------
-1. Top local directory
-   The folder to scan.
+permissions:
+  contents: write
 
-2. Optional subdirectory that maps to the public R2 root
-   Leave blank if the top directory itself is the public root.
+jobs:
+  build-gallery-index:
+    runs-on: ubuntu-latest
 
-3. Public base URL
-   Example:
-   https://pub-45574594fe14428bb489dfce86a05754.r2.dev
-   or
-   https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-4. Output JSON path
-   Press Enter to use ./gallery.json
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-Quoted input
-------------
-You can paste values with or without wrapping quotes.
+      - name: Generate combined gallery index
+        shell: bash
+        run: |
+          mkdir -p generated
 
-Examples:
-"C:\Users\mahan\OneDrive\Desktop\article_screenshots"
-'C:\Users\mahan\OneDrive\Desktop\article_screenshots'
-https://pub-45574594fe14428bb489dfce86a05754.r2.dev
-#>
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
 
-function Read-CleanInput {
-    param([string]$Prompt)
+          const uploadedDir = path.join(process.cwd(), 'uploaded_directories');
+          const outputDir = path.join(process.cwd(), 'generated');
+          const outputFile = path.join(outputDir, 'gallery-index.json');
 
-    $value = Read-Host $Prompt
+          function slugify(value) {
+            return String(value)
+              .toLowerCase()
+              .replace(/\.json$/i, '')
+              .replace(/[_\s]+/g, '-')
+              .replace(/[^a-z0-9-]/g, '-')
+              .replace(/-+/g, '-')
+              .replace(/^-|-$/g, '');
+          }
 
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        return $value
-    }
+          function titleCase(value) {
+            return String(value)
+              .replace(/[-_]+/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .replace(/\b\w/g, c => c.toUpperCase());
+          }
 
-    $value = $value.Trim()
+          function walkJsonFiles(dir) {
+            if (!fs.existsSync(dir)) return [];
+            const results = [];
 
-    if (
-        ($value.StartsWith('"') -and $value.EndsWith('"')) -or
-        ($value.StartsWith("'") -and $value.EndsWith("'"))
-    ) {
-        if ($value.Length -ge 2) {
-            $value = $value.Substring(1, $value.Length - 2)
-        }
-    }
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                results.push(...walkJsonFiles(full));
+              } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
+                results.push(full);
+              }
+            }
 
-    return $value
-}
+            return results.sort((a, b) => a.localeCompare(b));
+          }
 
-function Normalize-ForwardSlashes {
-    param([string]$Path)
+          function deriveTitle(json, filePath) {
+            if (json.title && typeof json.title === 'string' && json.title.trim()) {
+              return json.title.trim();
+            }
 
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return ""
-    }
+            if (json.local_r2_root && typeof json.local_r2_root === 'string') {
+              const normalized = json.local_r2_root.replace(/\\/g, '/');
+              const last = normalized.split('/').filter(Boolean).pop();
+              if (last) return titleCase(last);
+            }
 
-    return ($Path -replace '\\', '/').Trim('/')
-}
+            if (Array.isArray(json.files) && json.files.length > 0) {
+              const firstPath = json.files[0]?.path;
+              if (typeof firstPath === 'string' && firstPath.includes('/')) {
+                const firstFolder = firstPath.split('/').filter(Boolean)[0];
+                if (firstFolder) return titleCase(firstFolder);
+              }
+            }
 
-function Get-RelativePathSafe {
-    param(
-        [string]$BasePath,
-        [string]$FullPath
-    )
+            return titleCase(path.basename(filePath, '.json'));
+          }
 
-    $baseResolved = (Resolve-Path $BasePath).Path
-    $fullResolved = (Resolve-Path $FullPath).Path
+          function deriveSlug(title, filePath, usedSlugs) {
+            let base = slugify(title) || slugify(path.basename(filePath, '.json')) || 'gallery';
+            let slug = base;
+            let i = 2;
 
-    $baseUri = New-Object System.Uri(($baseResolved.TrimEnd('\') + '\'))
-    $fullUri = New-Object System.Uri($fullResolved)
+            while (usedSlugs.has(slug)) {
+              slug = `${base}-${i}`;
+              i += 1;
+            }
 
-    $relative = $baseUri.MakeRelativeUri($fullUri).ToString()
-    return [System.Uri]::UnescapeDataString($relative) -replace '\\', '/'
-}
+            usedSlugs.add(slug);
+            return slug;
+          }
 
-function Encode-UrlPathSegments {
-    param([string]$RelativePath)
+          const files = walkJsonFiles(uploadedDir);
+          const usedSlugs = new Set();
 
-    $normalized = Normalize-ForwardSlashes $RelativePath
-    if ([string]::IsNullOrWhiteSpace($normalized)) {
-        return ""
-    }
+          const galleries = files.map(filePath => {
+            const raw = fs.readFileSync(filePath, 'utf8');
+            const json = JSON.parse(raw);
 
-    $segments = $normalized.Split('/')
-    $encodedSegments = foreach ($segment in $segments) {
-        [System.Uri]::EscapeDataString($segment)
-    }
+            const title = deriveTitle(json, filePath);
+            const slug = deriveSlug(title, filePath, usedSlugs);
 
-    return ($encodedSegments -join '/')
-}
+            const relativeSource = path
+              .relative(process.cwd(), filePath)
+              .replace(/\\/g, '/');
 
-function Add-FileToTree {
-    param(
-        [hashtable]$Tree,
-        [string[]]$Parts,
-        [hashtable]$FileEntry
-    )
+            const links = Array.isArray(json.links) ? json.links : [];
+            const fileCount =
+              typeof json.total_files === 'number'
+                ? json.total_files
+                : Array.isArray(json.files)
+                  ? json.files.length
+                  : links.length;
 
-    if ($Parts.Count -eq 0) {
-        if (-not $Tree.ContainsKey("_files")) {
-            $Tree["_files"] = @()
-        }
-        $Tree["_files"] += [pscustomobject]$FileEntry
-        return
-    }
+            return {
+              slug,
+              title,
+              source: relativeSource,
+              generated_from_filename: path.basename(filePath),
+              image_count: links.length,
+              total_files: fileCount,
+              links
+            };
+          });
 
-    $head = $Parts[0]
-    $rest = @()
+          const output = {
+            generated_utc: new Date().toISOString(),
+            gallery_count: galleries.length,
+            galleries
+          };
 
-    if ($Parts.Count -gt 1) {
-        $rest = $Parts[1..($Parts.Count - 1)]
-    }
+          fs.mkdirSync(outputDir, { recursive: true });
+          fs.writeFileSync(outputFile, JSON.stringify(output, null, 2) + '\n', 'utf8');
 
-    if (-not $Tree.ContainsKey($head)) {
-        $Tree[$head] = @{}
-    }
+          console.log(`Wrote ${outputFile}`);
+          console.log(`Indexed ${galleries.length} gallery JSON file(s).`);
+          NODE
 
-    Add-FileToTree -Tree $Tree[$head] -Parts $rest -FileEntry $FileEntry
-}
+      - name: Commit generated index
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-Write-Host ""
-Write-Host "R2 Gallery JSON Builder"
-Write-Host "-----------------------"
-Write-Host ""
+          git add generated/gallery-index.json
 
-$topDirectory = Read-CleanInput "1) Enter top local directory"
-if ([string]::IsNullOrWhiteSpace($topDirectory)) {
-    Write-Error "Top local directory is required."
-    exit 1
-}
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
 
-if (-not (Test-Path $topDirectory -PathType Container)) {
-    Write-Error "Top directory does not exist or is not a folder: $topDirectory"
-    exit 1
-}
-
-$resolvedTop = (Resolve-Path $topDirectory).Path
-
-$r2RootLocal = Normalize-ForwardSlashes (Read-CleanInput "2) Enter subdirectory that maps to R2 root (leave blank if top directory itself is the root)")
-
-if ([string]::IsNullOrWhiteSpace($r2RootLocal)) {
-    $r2RootFull = $resolvedTop
-}
-else {
-    $r2RootFull = Join-Path $resolvedTop ($r2RootLocal -replace '/', '\')
-}
-
-if (-not (Test-Path $r2RootFull -PathType Container)) {
-    Write-Error "R2 root folder not found: $r2RootFull"
-    exit 1
-}
-
-$publicBaseUrl = Read-CleanInput "3) Enter public base URL"
-if ([string]::IsNullOrWhiteSpace($publicBaseUrl)) {
-    Write-Error "Public base URL is required."
-    exit 1
-}
-$publicBaseUrl = $publicBaseUrl.Trim().TrimEnd('/')
-
-$outputFile = Read-CleanInput "4) Output JSON path (press Enter for ./gallery.json)"
-if ([string]::IsNullOrWhiteSpace($outputFile)) {
-    $outputFile = Join-Path (Get-Location) "gallery.json"
-}
-
-$allFiles = Get-ChildItem -Path $r2RootFull -Recurse -File | Sort-Object FullName
-
-$links = New-Object System.Collections.Generic.List[string]
-$fileObjects = New-Object System.Collections.Generic.List[object]
-$tree = @{}
-
-foreach ($file in $allFiles) {
-    $relativeFromRoot = Get-RelativePathSafe -BasePath $r2RootFull -FullPath $file.FullName
-    $encodedPath = Encode-UrlPathSegments $relativeFromRoot
-    $publicUrl = "$publicBaseUrl/$encodedPath"
-
-    $entry = [ordered]@{
-        name = $file.Name
-        path = $relativeFromRoot
-        url  = $publicUrl
-    }
-
-    $links.Add($publicUrl)
-    $fileObjects.Add([pscustomobject]$entry)
-
-    $dirRelative = Split-Path $relativeFromRoot -Parent
-    if ([string]::IsNullOrWhiteSpace($dirRelative) -or $dirRelative -eq ".") {
-        $parts = @()
-    }
-    else {
-        $parts = (Normalize-ForwardSlashes $dirRelative).Split('/')
-    }
-
-    Add-FileToTree -Tree $tree -Parts $parts -FileEntry $entry
-}
-
-$result = [ordered]@{
-    generated_utc   = (Get-Date).ToUniversalTime().ToString("o")
-    top_directory   = $resolvedTop
-    local_r2_root   = $r2RootFull
-    public_base_url = $publicBaseUrl
-    total_files     = $fileObjects.Count
-    links           = $links
-    files           = $fileObjects
-    tree            = $tree
-}
-
-$result | ConvertTo-Json -Depth 100 | Set-Content -Path $outputFile -Encoding UTF8
-Start-Process notepad.exe $outputFile
-
-Write-Host ""
-Write-Host "Done."
-Write-Host "JSON written to: $outputFile"
-Write-Host "Files indexed: $($fileObjects.Count)"
-Write-Host ""
+          git commit -m "Update generated gallery index"
+          git push
