@@ -23,7 +23,6 @@ const readerState = {
   currentWindowEnd: 0,
   heights: new Map(),
   thumbObserver: null,
-  lastScrollTop: 0,
   scrollTicking: false
 };
 
@@ -338,7 +337,6 @@ function buildKeepReadingButton() {
   button.textContent = "Keep reading";
 
   button.addEventListener("click", () => {
-    const oldHeight = els.readerBody.scrollHeight;
     const oldTop = els.readerBody.scrollTop;
 
     readerState.loadedUntil = Math.min(
@@ -350,10 +348,7 @@ function buildKeepReadingButton() {
     renderReaderWindow(nextWindow.start, nextWindow.end);
 
     requestAnimationFrame(() => {
-      const newHeight = els.readerBody.scrollHeight;
-      if (newHeight > oldHeight) {
-        els.readerBody.scrollTop = oldTop;
-      }
+      els.readerBody.scrollTop = oldTop;
     });
   });
 
@@ -366,43 +361,6 @@ function computeWindowForCenter(centerIndex) {
   const start = Math.max(0, centerIndex - KEEP_BEFORE);
   const end = Math.min(maxLoadedIndex, centerIndex + KEEP_AFTER);
   return { start, end };
-}
-
-function renderReaderWindow(start, end) {
-  const oldTop = els.readerBody.scrollTop;
-  const oldAnchorIndex = findClosestIndexToViewportCenter();
-
-  readerState.currentWindowStart = start;
-  readerState.currentWindowEnd = end;
-
-  const fragment = document.createDocumentFragment();
-
-  for (let i = 0; i < readerState.loadedUntil; i++) {
-    if (i >= start && i <= end) {
-      fragment.appendChild(makeReaderPage(i, state.files[i]));
-    } else {
-      fragment.appendChild(makeSpacer(i));
-    }
-  }
-
-  const keepReading = buildKeepReadingButton();
-  if (keepReading) {
-    fragment.appendChild(keepReading);
-  }
-
-  els.readerStack.innerHTML = "";
-  els.readerStack.appendChild(fragment);
-  updateReaderHeader();
-
-  requestAnimationFrame(() => {
-    const anchor = document.getElementById(`reader-page-${oldAnchorIndex}`);
-    if (anchor) {
-      const desiredTop = Math.max(0, anchor.offsetTop - 120);
-      els.readerBody.scrollTop = desiredTop;
-    } else {
-      els.readerBody.scrollTop = oldTop;
-    }
-  });
 }
 
 function findClosestIndexToViewportCenter() {
@@ -429,6 +387,42 @@ function findClosestIndexToViewportCenter() {
   return bestIndex;
 }
 
+function renderReaderWindow(start, end) {
+  const oldTop = els.readerBody.scrollTop;
+  const anchorIndex = findClosestIndexToViewportCenter();
+
+  readerState.currentWindowStart = start;
+  readerState.currentWindowEnd = end;
+
+  const fragment = document.createDocumentFragment();
+
+  for (let i = 0; i < readerState.loadedUntil; i++) {
+    if (i >= start && i <= end) {
+      fragment.appendChild(makeReaderPage(i, state.files[i]));
+    } else {
+      fragment.appendChild(makeSpacer(i));
+    }
+  }
+
+  const keepReading = buildKeepReadingButton();
+  if (keepReading) {
+    fragment.appendChild(keepReading);
+  }
+
+  els.readerStack.innerHTML = "";
+  els.readerStack.appendChild(fragment);
+  updateReaderHeader();
+
+  requestAnimationFrame(() => {
+    const anchor = document.getElementById(`reader-page-${anchorIndex}`);
+    if (anchor) {
+      els.readerBody.scrollTop = Math.max(0, anchor.offsetTop - 120);
+    } else {
+      els.readerBody.scrollTop = oldTop;
+    }
+  });
+}
+
 function maybeShiftReaderWindow() {
   const center = findClosestIndexToViewportCenter();
   readerState.centerIndex = center;
@@ -436,12 +430,12 @@ function maybeShiftReaderWindow() {
   const nearTop = center <= readerState.currentWindowStart + SHIFT_BUFFER;
   const nearBottom = center >= readerState.currentWindowEnd - SHIFT_BUFFER;
 
-  const atAbsoluteTop = readerState.currentWindowStart === 0 && center <= SHIFT_BUFFER;
-  const atAbsoluteBottom =
+  const hardTop = readerState.currentWindowStart === 0 && center <= SHIFT_BUFFER;
+  const hardBottom =
     readerState.currentWindowEnd >= readerState.loadedUntil - 1 &&
     center >= Math.max(0, readerState.loadedUntil - 1 - SHIFT_BUFFER);
 
-  if (atAbsoluteTop || atAbsoluteBottom) {
+  if (hardTop || hardBottom) {
     return;
   }
 
@@ -462,13 +456,48 @@ function maybeShiftReaderWindow() {
 }
 
 function onReaderScroll() {
-  if (readerState.scrollTicking) return;
+  if (!readerState.open || readerState.scrollTicking) return;
 
   readerState.scrollTicking = true;
+
   requestAnimationFrame(() => {
     maybeShiftReaderWindow();
     readerState.scrollTicking = false;
   });
+}
+
+function onReaderKeydown(event) {
+  if (!readerState.open) return;
+
+  const step = 80;
+  const pageStep = Math.max(240, Math.floor(els.readerBody.clientHeight * 0.9));
+
+  switch (event.key) {
+    case "ArrowDown":
+      event.preventDefault();
+      els.readerBody.scrollBy({ top: step, behavior: "auto" });
+      break;
+    case "ArrowUp":
+      event.preventDefault();
+      els.readerBody.scrollBy({ top: -step, behavior: "auto" });
+      break;
+    case "PageDown":
+      event.preventDefault();
+      els.readerBody.scrollBy({ top: pageStep, behavior: "auto" });
+      break;
+    case "PageUp":
+      event.preventDefault();
+      els.readerBody.scrollBy({ top: -pageStep, behavior: "auto" });
+      break;
+    case "Home":
+      event.preventDefault();
+      els.readerBody.scrollTo({ top: 0, behavior: "auto" });
+      break;
+    case "End":
+      event.preventDefault();
+      els.readerBody.scrollTo({ top: els.readerBody.scrollHeight, behavior: "auto" });
+      break;
+  }
 }
 
 function openReader(startIndex = 0) {
@@ -487,9 +516,15 @@ function openReader(startIndex = 0) {
   els.reader.setAttribute("aria-hidden", "false");
   document.body.classList.add("reader-open");
 
+  if (!els.readerBody.hasAttribute("tabindex")) {
+    els.readerBody.setAttribute("tabindex", "0");
+  }
+
   renderReaderWindow(initialWindow.start, initialWindow.end);
 
   requestAnimationFrame(() => {
+    els.readerBody.focus({ preventScroll: true });
+
     const target = document.getElementById(`reader-page-${startIndex}`);
     if (target) {
       target.scrollIntoView({ block: "start", behavior: "auto" });
@@ -523,6 +558,7 @@ function bindEvents() {
   });
 
   els.readerBody.addEventListener("scroll", onReaderScroll, { passive: true });
+  els.readerBody.addEventListener("keydown", onReaderKeydown);
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && readerState.open) {
