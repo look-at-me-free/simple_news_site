@@ -2,10 +2,10 @@ const DATA_URL = "./generated/gallery-index.json";
 
 const INITIAL_LOAD = 20;
 const LOAD_STEP = 20;
-const KEEP_BEFORE = 10;
-const KEEP_AFTER = 10;
+const KEEP_BEFORE = 12;
+const KEEP_AFTER = 12;
 const THUMB_ROOT_MARGIN = "300px";
-const READER_ROOT_MARGIN = "1200px";
+const READER_ROOT_MARGIN = "800px 0px 800px 0px";
 
 const state = {
   data: null,
@@ -22,7 +22,9 @@ const readerState = {
   heights: new Map(),
   thumbObserver: null,
   readerObserver: null,
-  refreshQueued: false
+  refreshQueued: false,
+  currentWindowStart: 0,
+  currentWindowEnd: 0
 };
 
 const els = {
@@ -90,17 +92,11 @@ function extractGroupFromUrl(url) {
     const parsed = new URL(url);
     const segments = parsed.pathname.split("/").filter(Boolean);
 
-    if (!segments.length) return "Misc";
-
-    // For your structure:
-    // /article_screenshots/Before%20Mass%20Media/file.png
-    // group is the second-to-last directory component after root folder
     if (segments.length >= 2) {
-      const group = segments[segments.length - 2];
-      return safeDecode(group);
+      return safeDecode(segments[segments.length - 2]);
     }
 
-    return safeDecode(segments[0]);
+    return "Misc";
   } catch {
     const cleaned = String(url).split("?")[0].split("#")[0];
     const parts = cleaned.split("/").filter(Boolean);
@@ -166,7 +162,7 @@ function groupFiles(files) {
 function renderHero() {
   els.heroTitle.textContent = state.sourceTitle;
   els.heroText.textContent =
-    "Loaded from generated/gallery-index.json. Sections are inferred from the directory names inside each image URL, and the reader uses a sliding window so the browser does not have to keep the full stack live.";
+    "Loaded from generated/gallery-index.json. Sections are inferred from directory names inside each image URL. The reader uses lazy loading plus a sliding window so it stays smooth and avoids browser thrash.";
 
   els.groupCount.textContent = String(state.groups.length);
   els.imageCount.textContent = String(state.files.length);
@@ -347,7 +343,7 @@ function createReaderObserver() {
           img.src = img.dataset.src;
         }
 
-        if (entry.isIntersecting) {
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.45) {
           const page = img.closest(".reader-page");
           if (page) {
             const index = Number(page.dataset.index);
@@ -367,7 +363,7 @@ function createReaderObserver() {
     {
       root: els.readerBody,
       rootMargin: READER_ROOT_MARGIN,
-      threshold: [0, 0.1, 0.25, 0.5, 0.75, 1]
+      threshold: [0.25, 0.45, 0.6, 0.8]
     }
   );
 }
@@ -380,7 +376,7 @@ function observeReaderImages() {
   });
 }
 
-function currentReaderWindow() {
+function desiredReaderWindow() {
   const start = Math.max(0, readerState.centerIndex - KEEP_BEFORE);
   const end = Math.min(readerState.loadedUntil - 1, readerState.centerIndex + KEEP_AFTER);
   return { start, end };
@@ -404,16 +400,21 @@ function buildKeepReadingButton() {
       readerState.loadedUntil + LOAD_STEP,
       state.files.length
     );
-    renderReaderWindow();
+
+    const nextWindow = desiredReaderWindow();
+    renderReaderWindow(nextWindow.start, nextWindow.end);
   });
 
   wrap.appendChild(button);
   return wrap;
 }
 
-function renderReaderWindow() {
-  const previousScrollTop = els.readerBody.scrollTop;
-  const { start, end } = currentReaderWindow();
+function renderReaderWindow(start, end) {
+  const oldScrollHeight = els.readerBody.scrollHeight;
+  const oldScrollTop = els.readerBody.scrollTop;
+
+  readerState.currentWindowStart = start;
+  readerState.currentWindowEnd = end;
 
   const fragment = document.createDocumentFragment();
 
@@ -436,7 +437,38 @@ function renderReaderWindow() {
   updateReaderHeader();
   observeReaderImages();
 
-  els.readerBody.scrollTop = previousScrollTop;
+  requestAnimationFrame(() => {
+    const newScrollHeight = els.readerBody.scrollHeight;
+    const delta = newScrollHeight - oldScrollHeight;
+
+    if (delta !== 0) {
+      els.readerBody.scrollTop = oldScrollTop + Math.max(0, delta);
+    } else {
+      els.readerBody.scrollTop = oldScrollTop;
+    }
+  });
+}
+
+function maybeShiftReaderWindow() {
+  const { currentWindowStart, currentWindowEnd, centerIndex } = readerState;
+
+  const nearTopEdge = centerIndex <= currentWindowStart + 2;
+  const nearBottomEdge = centerIndex >= currentWindowEnd - 2;
+
+  if (!nearTopEdge && !nearBottomEdge) {
+    return;
+  }
+
+  const next = desiredReaderWindow();
+
+  if (
+    next.start === currentWindowStart &&
+    next.end === currentWindowEnd
+  ) {
+    return;
+  }
+
+  renderReaderWindow(next.start, next.end);
 }
 
 function queueReaderRefresh() {
@@ -444,7 +476,7 @@ function queueReaderRefresh() {
   readerState.refreshQueued = true;
 
   requestAnimationFrame(() => {
-    renderReaderWindow();
+    maybeShiftReaderWindow();
     readerState.refreshQueued = false;
   });
 }
@@ -459,11 +491,14 @@ function openReader(startIndex = 0) {
     Math.min(startIndex + KEEP_AFTER + 1, state.files.length)
   );
 
+  const initialStart = Math.max(0, readerState.centerIndex - KEEP_BEFORE);
+  const initialEnd = Math.min(readerState.loadedUntil - 1, readerState.centerIndex + KEEP_AFTER);
+
   els.reader.classList.add("open");
   els.reader.setAttribute("aria-hidden", "false");
   document.body.classList.add("reader-open");
 
-  renderReaderWindow();
+  renderReaderWindow(initialStart, initialEnd);
 
   requestAnimationFrame(() => {
     const target = document.getElementById(`reader-page-${startIndex}`);
