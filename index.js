@@ -1,29 +1,44 @@
-const INDEX_URL = "./generated/gallery-index.json";
+const DATA_URL = "./uploaded_directories/archive.json"; // change this to your JSON file
+
+const INITIAL_LOAD = 20;
+const LOAD_STEP = 20;
+const KEEP_BEFORE = 10;
+const KEEP_AFTER = 10;
+const THUMB_ROOT_MARGIN = "300px";
+const READER_ROOT_MARGIN = "1200px";
 
 const state = {
   data: null,
-  activeGallery: null,
-  lastFocusedThumb: null
+  groups: [],
+  files: [],
+  globalIndexByUrl: new Map()
+};
+
+const readerState = {
+  open: false,
+  loadedUntil: 0,
+  centerIndex: 0,
+  heights: new Map(),
+  thumbObserver: null,
+  readerImgObserver: null,
+  refreshQueued: false
 };
 
 const els = {
-  gallerySelect: document.getElementById("gallerySelect"),
-  galleryCards: document.getElementById("galleryCards"),
-  imageGridContainer: document.getElementById("imageGridContainer"),
   heroTitle: document.getElementById("heroTitle"),
   heroText: document.getElementById("heroText"),
-  galleryCount: document.getElementById("galleryCount"),
+  groupCount: document.getElementById("groupCount"),
   imageCount: document.getElementById("imageCount"),
-  activeGalleryTitle: document.getElementById("activeGalleryTitle"),
-  activeGalleryMeta: document.getElementById("activeGalleryMeta"),
-  openReaderTop: document.getElementById("openReaderTop"),
+  groupNav: document.getElementById("groupNav"),
+  groupsContainer: document.getElementById("groupsContainer"),
+  openReaderFromTop: document.getElementById("openReaderFromTop"),
   reader: document.getElementById("reader"),
-  readerBody: document.getElementById("readerBody"),
-  readerStack: document.getElementById("readerStack"),
   readerTitle: document.getElementById("readerTitle"),
   readerSubtitle: document.getElementById("readerSubtitle"),
+  readerTopBtn: document.getElementById("readerTopBtn"),
   closeReaderBtn: document.getElementById("closeReaderBtn"),
-  jumpToTopBtn: document.getElementById("jumpToTopBtn")
+  readerBody: document.getElementById("readerBody"),
+  readerStack: document.getElementById("readerStack")
 };
 
 function escapeHtml(value) {
@@ -39,220 +54,384 @@ function escapeHtml(value) {
   });
 }
 
-function getQueryParam(name) {
-  const params = new URLSearchParams(window.location.search);
-  return params.get(name);
-}
+async function loadJson(url) {
+  const response = await fetch(url, {
+    method: "GET",
+    cache: "no-store",
+    headers: { Accept: "application/json" }
+  });
 
-function setQueryParam(name, value) {
-  const url = new URL(window.location.href);
-
-  if (value === null || value === undefined || value === "") {
-    url.searchParams.delete(name);
-  } else {
-    url.searchParams.set(name, value);
-  }
-
-  window.history.replaceState({}, "", url.toString());
-}
-
-function toTitleCase(value) {
-  return String(value)
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function inferThumbTitle(gallery) {
-  if (gallery.title) return gallery.title;
-  if (gallery.slug) return toTitleCase(gallery.slug);
-  return "Untitled Gallery";
-}
-
-async function loadIndex() {
-  const response = await fetch(INDEX_URL, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`Failed to load ${INDEX_URL} (${response.status})`);
+    throw new Error(`Failed to load JSON: ${response.status} ${response.statusText}`);
   }
+
   return response.json();
 }
 
+function topDirFromPath(filePath) {
+  if (!filePath || typeof filePath !== "string") return "Misc";
+  const normalized = filePath.replace(/\\/g, "/").trim();
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[0] || "Misc";
+}
+
+function buildGroupsFromJson(data) {
+  if (data.tree && typeof data.tree === "object" && !Array.isArray(data.tree)) {
+    const groups = Object.entries(data.tree).map(([title, node]) => ({
+      title,
+      items: Array.isArray(node?._files) ? node._files.slice() : []
+    }));
+
+    groups.sort((a, b) => a.title.localeCompare(b.title));
+    return groups;
+  }
+
+  const grouped = new Map();
+  const files = Array.isArray(data.files) ? data.files : [];
+
+  for (const file of files) {
+    const title = topDirFromPath(file.path);
+
+    if (!grouped.has(title)) {
+      grouped.set(title, []);
+    }
+
+    grouped.get(title).push(file);
+  }
+
+  return Array.from(grouped.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([title, items]) => ({ title, items }));
+}
+
+function flattenGroups(groups) {
+  const flat = [];
+
+  for (const group of groups) {
+    for (const item of group.items) {
+      flat.push({
+        ...item,
+        groupTitle: group.title
+      });
+    }
+  }
+
+  return flat;
+}
+
+function buildGlobalIndexMap(files) {
+  const map = new Map();
+  files.forEach((file, index) => {
+    map.set(file.url, index);
+  });
+  return map;
+}
+
 function renderHero() {
-  const galleryCount = Array.isArray(state.data?.galleries) ? state.data.galleries.length : 0;
-  const activeCount = Array.isArray(state.activeGallery?.links) ? state.activeGallery.links.length : 0;
+  els.heroTitle.textContent = "Archive ready";
+  els.heroText.textContent =
+    "Sections are derived directly from the first directory in files[].path. " +
+    "Thumbnails lazy-load, and the reader uses a sliding window so the browser does not have to keep the whole stack live at once.";
 
-  els.galleryCount.textContent = String(galleryCount);
-  els.imageCount.textContent = String(activeCount);
-
-  if (state.activeGallery) {
-    els.heroTitle.textContent = inferThumbTitle(state.activeGallery);
-    els.heroText.textContent =
-      `Selected gallery loaded from ${state.activeGallery.generated_from_filename || state.activeGallery.source || "generated data"}. ` +
-      `Click any image to open the scroll reader and move downward through the full stack.`;
-  } else {
-    els.heroTitle.textContent = "Archive ready";
-    els.heroText.textContent =
-      "Choose a gallery below. New uploaded JSON files will appear automatically after the workflow rebuilds the generated index.";
-  }
+  els.groupCount.textContent = String(state.groups.length);
+  els.imageCount.textContent = String(state.files.length);
 }
 
-function renderSelect() {
-  const galleries = Array.isArray(state.data?.galleries) ? state.data.galleries : [];
-
-  if (!galleries.length) {
-    els.gallerySelect.innerHTML = `<option value="">No galleries found</option>`;
-    els.gallerySelect.disabled = true;
+function renderGroupNav() {
+  if (!state.groups.length) {
+    els.groupNav.innerHTML = `<div class="state-box">No directory groups found.</div>`;
     return;
   }
 
-  els.gallerySelect.disabled = false;
-  els.gallerySelect.innerHTML = galleries
-    .map((gallery) => {
-      const title = inferThumbTitle(gallery);
-      const selected = state.activeGallery?.slug === gallery.slug ? "selected" : "";
-      return `<option value="${escapeHtml(gallery.slug)}" ${selected}>${escapeHtml(title)}</option>`;
-    })
-    .join("");
-}
-
-function renderGalleryCards() {
-  const galleries = Array.isArray(state.data?.galleries) ? state.data.galleries : [];
-
-  if (!galleries.length) {
-    els.galleryCards.innerHTML = `<div class="empty-state">No galleries were found in the generated index.</div>`;
-    return;
-  }
-
-  els.galleryCards.innerHTML = galleries
-    .map((gallery) => {
-      const title = inferThumbTitle(gallery);
-      const isActive = state.activeGallery?.slug === gallery.slug;
+  els.groupNav.innerHTML = state.groups
+    .map((group, index) => {
+      const anchorId = `group-${index}`;
       return `
-        <button
-          class="gallery-card ${isActive ? "active" : ""}"
-          type="button"
-          data-gallery-slug="${escapeHtml(gallery.slug)}"
-        >
-          <div class="gallery-card-top">
-            <div>
-              <h3 class="gallery-card-title">${escapeHtml(title)}</h3>
-              <div class="gallery-card-meta">${escapeHtml(gallery.slug)}</div>
-            </div>
-            <div class="pill">${Number(gallery.image_count || 0)} images</div>
-          </div>
-          <div class="gallery-card-footer">${escapeHtml(gallery.generated_from_filename || gallery.source || "Generated gallery")}</div>
+        <button class="group-chip" type="button" data-target="${escapeHtml(anchorId)}">
+          ${escapeHtml(group.title)} (${group.items.length})
         </button>
       `;
     })
     .join("");
 
-  els.galleryCards.querySelectorAll("[data-gallery-slug]").forEach((button) => {
+  els.groupNav.querySelectorAll("[data-target]").forEach((button) => {
     button.addEventListener("click", () => {
-      const slug = button.getAttribute("data-gallery-slug");
-      activateGallery(slug);
+      const target = document.getElementById(button.dataset.target);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     });
   });
 }
 
-function renderImageGrid() {
-  const gallery = state.activeGallery;
+function createThumbObserver() {
+  if (readerState.thumbObserver) {
+    readerState.thumbObserver.disconnect();
+  }
 
-  if (!gallery) {
-    els.activeGalleryTitle.textContent = "Gallery";
-    els.activeGalleryMeta.textContent = "Choose a gallery to begin.";
-    els.imageGridContainer.innerHTML = `<div class="empty-state">Select a gallery above to load its image grid.</div>`;
-    els.openReaderTop.disabled = true;
-    els.openReaderTop.style.opacity = "0.5";
+  readerState.thumbObserver = new IntersectionObserver(
+    (entries, observer) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const img = entry.target;
+        const src = img.dataset.src;
+        if (src && !img.src) {
+          img.src = src;
+        }
+        observer.unobserve(img);
+      }
+    },
+    {
+      root: null,
+      rootMargin: THUMB_ROOT_MARGIN,
+      threshold: 0.01
+    }
+  );
+}
+
+function observeThumbs() {
+  createThumbObserver();
+
+  document.querySelectorAll("img[data-src].thumb-lazy").forEach((img) => {
+    readerState.thumbObserver.observe(img);
+  });
+}
+
+function renderGroups() {
+  if (!state.groups.length) {
+    els.groupsContainer.innerHTML = `<div class="state-box">No images found in the supplied JSON.</div>`;
     return;
   }
 
-  const links = Array.isArray(gallery.links) ? gallery.links : [];
-  const title = inferThumbTitle(gallery);
+  els.groupsContainer.innerHTML = state.groups
+    .map((group, groupIndex) => {
+      const sectionId = `group-${groupIndex}`;
 
-  els.activeGalleryTitle.textContent = title;
-  els.activeGalleryMeta.textContent = `${links.length} image${links.length === 1 ? "" : "s"} in this gallery`;
-  els.openReaderTop.disabled = !links.length;
-  els.openReaderTop.style.opacity = links.length ? "1" : "0.5";
-
-  if (!links.length) {
-    els.imageGridContainer.innerHTML = `<div class="empty-state">This gallery does not contain any image links.</div>`;
-    return;
-  }
-
-  els.imageGridContainer.innerHTML = `
-    <div class="thumb-grid">
-      ${links.map((url, index) => `
-        <button
-          class="thumb-card"
-          type="button"
-          data-thumb-index="${index}"
-          aria-label="Open image ${index + 1} in reader"
-        >
-          <div class="thumb-media">
-            <img
-              src="${escapeHtml(url)}"
-              alt="${escapeHtml(`${title} image ${index + 1}`)}"
-              loading="lazy"
-              decoding="async"
-            />
+      return `
+        <section id="${escapeHtml(sectionId)}" class="group-section">
+          <div class="group-header">
+            <div>
+              <h3 class="group-title">${escapeHtml(group.title)}</h3>
+              <div class="group-meta">${group.items.length} image${group.items.length === 1 ? "" : "s"}</div>
+            </div>
           </div>
-          <div class="thumb-overlay">
-            <div class="thumb-index">#${index + 1}</div>
-            <div class="thumb-open">Open reader</div>
-          </div>
-        </button>
-      `).join("")}
-    </div>
-  `;
 
-  els.imageGridContainer.querySelectorAll("[data-thumb-index]").forEach((button) => {
+          <div class="thumb-grid">
+            ${group.items
+              .map((file) => {
+                const globalIndex = state.globalIndexByUrl.get(file.url);
+                return `
+                  <button class="thumb-card" type="button" data-open-index="${globalIndex}">
+                    <div class="thumb-media">
+                      <img
+                        class="thumb-lazy"
+                        data-src="${escapeHtml(file.url)}"
+                        alt="${escapeHtml(file.name || group.title)}"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    </div>
+                    <div class="thumb-overlay">
+                      <div class="thumb-index">#${globalIndex + 1}</div>
+                      <div class="thumb-cta">Open reader</div>
+                    </div>
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  observeThumbs();
+
+  els.groupsContainer.querySelectorAll("[data-open-index]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.lastFocusedThumb = button;
-      const index = Number(button.getAttribute("data-thumb-index"));
+      const index = Number(button.dataset.openIndex);
       openReader(index);
     });
   });
 }
 
-function buildReaderPages() {
-  const gallery = state.activeGallery;
-  const links = Array.isArray(gallery?.links) ? gallery.links : [];
-  const title = inferThumbTitle(gallery);
+function updateReaderHeader() {
+  els.readerTitle.textContent = "Reader";
+  els.readerSubtitle.textContent = `${readerState.loadedUntil} loaded · ${state.files.length} total`;
+}
 
-  els.readerStack.innerHTML = links
-    .map((url, index) => {
-      return `
-        <article class="reader-page" id="reader-page-${index}">
-          <img
-            src="${escapeHtml(url)}"
-            alt="${escapeHtml(`${title} page ${index + 1}`)}"
-            loading="lazy"
-            decoding="async"
-          />
-          <div class="reader-page-meta">Page ${index + 1} of ${links.length}</div>
-        </article>
-      `;
-    })
-    .join("");
+function makeReaderPage(index, file) {
+  const page = document.createElement("article");
+  page.className = "reader-page";
+  page.id = `reader-page-${index}`;
+  page.dataset.index = String(index);
+
+  const img = document.createElement("img");
+  img.alt = file.name || `Image ${index + 1}`;
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.dataset.src = file.url;
+
+  img.addEventListener("load", () => {
+    const measured = page.offsetHeight;
+    if (measured > 0) {
+      readerState.heights.set(index, measured);
+    }
+  });
+
+  const meta = document.createElement("div");
+  meta.className = "reader-page-meta";
+  meta.textContent = `${file.groupTitle || topDirFromPath(file.path)} · Page ${index + 1} of ${state.files.length}`;
+
+  page.appendChild(img);
+  page.appendChild(meta);
+  return page;
+}
+
+function makeSpacer(index) {
+  const spacer = document.createElement("div");
+  spacer.className = "reader-spacer";
+  spacer.dataset.index = String(index);
+  spacer.style.height = `${readerState.heights.get(index) || 420}px`;
+  return spacer;
+}
+
+function createReaderImgObserver() {
+  if (readerState.readerImgObserver) {
+    readerState.readerImgObserver.disconnect();
+  }
+
+  readerState.readerImgObserver = new IntersectionObserver(
+    (entries) => {
+      let bestIndex = readerState.centerIndex;
+      let bestRatio = 0;
+
+      for (const entry of entries) {
+        const img = entry.target;
+
+        if (entry.isIntersecting && img.dataset.src && !img.src) {
+          img.src = img.dataset.src;
+        }
+
+        if (entry.isIntersecting) {
+          const page = img.closest(".reader-page");
+          if (page) {
+            const index = Number(page.dataset.index);
+            if (entry.intersectionRatio > bestRatio) {
+              bestRatio = entry.intersectionRatio;
+              bestIndex = index;
+            }
+          }
+        }
+      }
+
+      if (bestIndex !== readerState.centerIndex) {
+        readerState.centerIndex = bestIndex;
+        queueReaderRefresh();
+      }
+    },
+    {
+      root: els.readerBody,
+      rootMargin: READER_ROOT_MARGIN,
+      threshold: [0, 0.1, 0.25, 0.5, 0.75, 1]
+    }
+  );
+}
+
+function observeReaderImages() {
+  createReaderImgObserver();
+
+  els.readerStack.querySelectorAll(".reader-page img[data-src]").forEach((img) => {
+    readerState.readerImgObserver.observe(img);
+  });
+}
+
+function currentReaderWindow() {
+  const start = Math.max(0, readerState.centerIndex - KEEP_BEFORE);
+  const end = Math.min(readerState.loadedUntil - 1, readerState.centerIndex + KEEP_AFTER);
+  return { start, end };
+}
+
+function buildKeepReadingButton() {
+  if (readerState.loadedUntil >= state.files.length) {
+    return null;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "keep-reading-wrap";
+
+  const button = document.createElement("button");
+  button.className = "keep-reading";
+  button.type = "button";
+  button.textContent = "Keep reading";
+
+  button.addEventListener("click", () => {
+    readerState.loadedUntil = Math.min(
+      readerState.loadedUntil + LOAD_STEP,
+      state.files.length
+    );
+    renderReaderWindow();
+  });
+
+  wrap.appendChild(button);
+  return wrap;
+}
+
+function renderReaderWindow() {
+  const prevScrollTop = els.readerBody.scrollTop;
+  const { start, end } = currentReaderWindow();
+
+  const fragment = document.createDocumentFragment();
+
+  for (let i = 0; i < readerState.loadedUntil; i++) {
+    if (i >= start && i <= end) {
+      fragment.appendChild(makeReaderPage(i, state.files[i]));
+    } else {
+      fragment.appendChild(makeSpacer(i));
+    }
+  }
+
+  const keepReading = buildKeepReadingButton();
+  if (keepReading) {
+    fragment.appendChild(keepReading);
+  }
+
+  els.readerStack.innerHTML = "";
+  els.readerStack.appendChild(fragment);
+
+  updateReaderHeader();
+  observeReaderImages();
+
+  els.readerBody.scrollTop = prevScrollTop;
+}
+
+function queueReaderRefresh() {
+  if (readerState.refreshQueued) return;
+  readerState.refreshQueued = true;
+
+  requestAnimationFrame(() => {
+    renderReaderWindow();
+    readerState.refreshQueued = false;
+  });
 }
 
 function openReader(startIndex = 0) {
-  const gallery = state.activeGallery;
-  if (!gallery || !Array.isArray(gallery.links) || !gallery.links.length) return;
+  if (!state.files.length) return;
 
-  buildReaderPages();
-
-  const title = inferThumbTitle(gallery);
-  els.readerTitle.textContent = title;
-  els.readerSubtitle.textContent = `${gallery.links.length} image${gallery.links.length === 1 ? "" : "s"} in vertical reader`;
+  readerState.open = true;
+  readerState.centerIndex = startIndex;
+  readerState.loadedUntil = Math.max(
+    Math.min(INITIAL_LOAD, state.files.length),
+    Math.min(startIndex + KEEP_AFTER + 1, state.files.length)
+  );
 
   els.reader.classList.add("open");
   els.reader.setAttribute("aria-hidden", "false");
-  document.body.classList.add("modal-open");
+  document.body.classList.add("reader-open");
+
+  renderReaderWindow();
 
   requestAnimationFrame(() => {
-    els.readerBody.scrollTop = 0;
     const target = document.getElementById(`reader-page-${startIndex}`);
     if (target) {
       target.scrollIntoView({ block: "start", behavior: "auto" });
@@ -261,47 +440,28 @@ function openReader(startIndex = 0) {
 }
 
 function closeReader() {
+  readerState.open = false;
+
+  if (readerState.readerImgObserver) {
+    readerState.readerImgObserver.disconnect();
+  }
+
   els.reader.classList.remove("open");
   els.reader.setAttribute("aria-hidden", "true");
-  document.body.classList.remove("modal-open");
-
-  if (state.lastFocusedThumb instanceof HTMLElement) {
-    state.lastFocusedThumb.focus();
-  }
-}
-
-function findGalleryBySlug(slug) {
-  const galleries = Array.isArray(state.data?.galleries) ? state.data.galleries : [];
-  return galleries.find((gallery) => gallery.slug === slug) || null;
-}
-
-function activateGallery(slug, pushToUrl = true) {
-  const gallery = findGalleryBySlug(slug);
-  if (!gallery) return;
-
-  state.activeGallery = gallery;
-
-  if (pushToUrl) {
-    setQueryParam("gallery", gallery.slug);
-  }
-
-  renderHero();
-  renderSelect();
-  renderGalleryCards();
-  renderImageGrid();
+  document.body.classList.remove("reader-open");
+  els.readerStack.innerHTML = "";
 }
 
 function bindEvents() {
-  els.gallerySelect.addEventListener("change", (event) => {
-    activateGallery(event.target.value);
-  });
-
-  els.openReaderTop.addEventListener("click", () => {
+  els.openReaderFromTop.addEventListener("click", () => {
     openReader(0);
   });
 
-  els.closeReaderBtn.addEventListener("click", closeReader);
-  els.jumpToTopBtn.addEventListener("click", () => {
+  els.closeReaderBtn.addEventListener("click", () => {
+    closeReader();
+  });
+
+  els.readerTopBtn.addEventListener("click", () => {
     els.readerBody.scrollTo({ top: 0, behavior: "smooth" });
   });
 
@@ -312,65 +472,37 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && els.reader.classList.contains("open")) {
+    if (event.key === "Escape" && readerState.open) {
       closeReader();
-    }
-  });
-
-  window.addEventListener("popstate", () => {
-    const slug = getQueryParam("gallery");
-    if (!slug) return;
-
-    const gallery = findGalleryBySlug(slug);
-    if (gallery) {
-      state.activeGallery = gallery;
-      renderHero();
-      renderSelect();
-      renderGalleryCards();
-      renderImageGrid();
     }
   });
 }
 
+function renderError(message) {
+  els.heroTitle.textContent = "Could not load archive";
+  els.heroText.textContent = message;
+  els.groupNav.innerHTML = "";
+  els.groupsContainer.innerHTML = `<div class="state-box">${escapeHtml(message)}</div>`;
+  els.groupCount.textContent = "0";
+  els.imageCount.textContent = "0";
+}
+
 async function init() {
   try {
-    els.galleryCards.innerHTML = `<div class="loading-state">Loading galleries...</div>`;
-    els.imageGridContainer.innerHTML = `<div class="loading-state">Loading image grid...</div>`;
+    els.groupsContainer.innerHTML = `<div class="state-box">Loading archive...</div>`;
 
-    state.data = await loadIndex();
-
-    const galleries = Array.isArray(state.data?.galleries) ? state.data.galleries : [];
-    if (!galleries.length) {
-      renderHero();
-      renderSelect();
-      renderGalleryCards();
-      renderImageGrid();
-      return;
-    }
-
-    const requestedSlug = getQueryParam("gallery");
-    const initialGallery =
-      (requestedSlug && findGalleryBySlug(requestedSlug)) ||
-      galleries[0];
-
-    state.activeGallery = initialGallery;
-
-    if (!requestedSlug && initialGallery?.slug) {
-      setQueryParam("gallery", initialGallery.slug);
-    }
+    state.data = await loadJson(DATA_URL);
+    state.groups = buildGroupsFromJson(state.data);
+    state.files = flattenGroups(state.groups);
+    state.globalIndexByUrl = buildGlobalIndexMap(state.files);
 
     renderHero();
-    renderSelect();
-    renderGalleryCards();
-    renderImageGrid();
+    renderGroupNav();
+    renderGroups();
     bindEvents();
   } catch (error) {
     console.error(error);
-
-    els.heroTitle.textContent = "Could not load archive";
-    els.heroText.textContent = error.message || "Unknown error";
-    els.galleryCards.innerHTML = `<div class="error-state">Failed to load generated/gallery-index.json</div>`;
-    els.imageGridContainer.innerHTML = `<div class="error-state">Check the generated file path and deployment output.</div>`;
+    renderError(error.message || "Unknown error.");
   }
 }
 
