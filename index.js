@@ -2,10 +2,10 @@ const DATA_URL = "./generated/gallery-index.json";
 
 const INITIAL_LOAD = 20;
 const LOAD_STEP = 20;
-const KEEP_BEFORE = 12;
-const KEEP_AFTER = 12;
+const KEEP_BEFORE = 14;
+const KEEP_AFTER = 14;
+const SHIFT_BUFFER = 5;
 const THUMB_ROOT_MARGIN = "300px";
-const READER_ROOT_MARGIN = "800px 0px 800px 0px";
 
 const state = {
   data: null,
@@ -19,12 +19,12 @@ const readerState = {
   open: false,
   loadedUntil: 0,
   centerIndex: 0,
+  currentWindowStart: 0,
+  currentWindowEnd: 0,
   heights: new Map(),
   thumbObserver: null,
-  readerObserver: null,
-  refreshQueued: false,
-  currentWindowStart: 0,
-  currentWindowEnd: 0
+  lastScrollTop: 0,
+  scrollTicking: false
 };
 
 const els = {
@@ -91,11 +91,9 @@ function extractGroupFromUrl(url) {
   try {
     const parsed = new URL(url);
     const segments = parsed.pathname.split("/").filter(Boolean);
-
     if (segments.length >= 2) {
       return safeDecode(segments[segments.length - 2]);
     }
-
     return "Misc";
   } catch {
     const cleaned = String(url).split("?")[0].split("#")[0];
@@ -162,7 +160,7 @@ function groupFiles(files) {
 function renderHero() {
   els.heroTitle.textContent = state.sourceTitle;
   els.heroText.textContent =
-    "Loaded from generated/gallery-index.json. Sections are inferred from directory names inside each image URL. The reader uses lazy loading plus a sliding window so it stays smooth and avoids browser thrash.";
+    "Loaded from generated/gallery-index.json. Sections are inferred from directory names inside each image URL. The reader uses a fixed sliding window with scroll-based updates only, to avoid end-of-stack flutter.";
 
   els.groupCount.textContent = String(state.groups.length);
   els.imageCount.textContent = String(state.files.length);
@@ -300,7 +298,7 @@ function makeReaderPage(index, file) {
   img.alt = file.name || `Image ${index + 1}`;
   img.loading = "lazy";
   img.decoding = "async";
-  img.dataset.src = file.url;
+  img.src = file.url;
 
   img.addEventListener("load", () => {
     const measured = page.offsetHeight;
@@ -322,64 +320,8 @@ function makeSpacer(index) {
   const spacer = document.createElement("div");
   spacer.className = "reader-spacer";
   spacer.dataset.index = String(index);
-  spacer.style.height = `${readerState.heights.get(index) || 420}px`;
+  spacer.style.height = `${readerState.heights.get(index) || 520}px`;
   return spacer;
-}
-
-function createReaderObserver() {
-  if (readerState.readerObserver) {
-    readerState.readerObserver.disconnect();
-  }
-
-  readerState.readerObserver = new IntersectionObserver(
-    (entries) => {
-      let bestIndex = readerState.centerIndex;
-      let bestRatio = 0;
-
-      for (const entry of entries) {
-        const img = entry.target;
-
-        if (entry.isIntersecting && img.dataset.src && !img.src) {
-          img.src = img.dataset.src;
-        }
-
-        if (entry.isIntersecting && entry.intersectionRatio >= 0.45) {
-          const page = img.closest(".reader-page");
-          if (page) {
-            const index = Number(page.dataset.index);
-            if (entry.intersectionRatio > bestRatio) {
-              bestRatio = entry.intersectionRatio;
-              bestIndex = index;
-            }
-          }
-        }
-      }
-
-      if (bestIndex !== readerState.centerIndex) {
-        readerState.centerIndex = bestIndex;
-        queueReaderRefresh();
-      }
-    },
-    {
-      root: els.readerBody,
-      rootMargin: READER_ROOT_MARGIN,
-      threshold: [0.25, 0.45, 0.6, 0.8]
-    }
-  );
-}
-
-function observeReaderImages() {
-  createReaderObserver();
-
-  els.readerStack.querySelectorAll(".reader-page img[data-src]").forEach((img) => {
-    readerState.readerObserver.observe(img);
-  });
-}
-
-function desiredReaderWindow() {
-  const start = Math.max(0, readerState.centerIndex - KEEP_BEFORE);
-  const end = Math.min(readerState.loadedUntil - 1, readerState.centerIndex + KEEP_AFTER);
-  return { start, end };
 }
 
 function buildKeepReadingButton() {
@@ -396,22 +338,39 @@ function buildKeepReadingButton() {
   button.textContent = "Keep reading";
 
   button.addEventListener("click", () => {
+    const oldHeight = els.readerBody.scrollHeight;
+    const oldTop = els.readerBody.scrollTop;
+
     readerState.loadedUntil = Math.min(
       readerState.loadedUntil + LOAD_STEP,
       state.files.length
     );
 
-    const nextWindow = desiredReaderWindow();
+    const nextWindow = computeWindowForCenter(readerState.centerIndex);
     renderReaderWindow(nextWindow.start, nextWindow.end);
+
+    requestAnimationFrame(() => {
+      const newHeight = els.readerBody.scrollHeight;
+      if (newHeight > oldHeight) {
+        els.readerBody.scrollTop = oldTop;
+      }
+    });
   });
 
   wrap.appendChild(button);
   return wrap;
 }
 
+function computeWindowForCenter(centerIndex) {
+  const maxLoadedIndex = readerState.loadedUntil - 1;
+  const start = Math.max(0, centerIndex - KEEP_BEFORE);
+  const end = Math.min(maxLoadedIndex, centerIndex + KEEP_AFTER);
+  return { start, end };
+}
+
 function renderReaderWindow(start, end) {
-  const oldScrollHeight = els.readerBody.scrollHeight;
-  const oldScrollTop = els.readerBody.scrollTop;
+  const oldTop = els.readerBody.scrollTop;
+  const oldAnchorIndex = findClosestIndexToViewportCenter();
 
   readerState.currentWindowStart = start;
   readerState.currentWindowEnd = end;
@@ -433,37 +392,68 @@ function renderReaderWindow(start, end) {
 
   els.readerStack.innerHTML = "";
   els.readerStack.appendChild(fragment);
-
   updateReaderHeader();
-  observeReaderImages();
 
   requestAnimationFrame(() => {
-    const newScrollHeight = els.readerBody.scrollHeight;
-    const delta = newScrollHeight - oldScrollHeight;
-
-    if (delta !== 0) {
-      els.readerBody.scrollTop = oldScrollTop + Math.max(0, delta);
+    const anchor = document.getElementById(`reader-page-${oldAnchorIndex}`);
+    if (anchor) {
+      const desiredTop = Math.max(0, anchor.offsetTop - 120);
+      els.readerBody.scrollTop = desiredTop;
     } else {
-      els.readerBody.scrollTop = oldScrollTop;
+      els.readerBody.scrollTop = oldTop;
     }
   });
 }
 
+function findClosestIndexToViewportCenter() {
+  const pages = Array.from(els.readerStack.querySelectorAll(".reader-page"));
+  if (!pages.length) {
+    return readerState.centerIndex;
+  }
+
+  const viewportCenter = els.readerBody.scrollTop + (els.readerBody.clientHeight / 2);
+
+  let bestIndex = readerState.centerIndex;
+  let bestDistance = Infinity;
+
+  for (const page of pages) {
+    const center = page.offsetTop + (page.offsetHeight / 2);
+    const distance = Math.abs(center - viewportCenter);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = Number(page.dataset.index);
+    }
+  }
+
+  return bestIndex;
+}
+
 function maybeShiftReaderWindow() {
-  const { currentWindowStart, currentWindowEnd, centerIndex } = readerState;
+  const center = findClosestIndexToViewportCenter();
+  readerState.centerIndex = center;
 
-  const nearTopEdge = centerIndex <= currentWindowStart + 2;
-  const nearBottomEdge = centerIndex >= currentWindowEnd - 2;
+  const nearTop = center <= readerState.currentWindowStart + SHIFT_BUFFER;
+  const nearBottom = center >= readerState.currentWindowEnd - SHIFT_BUFFER;
 
-  if (!nearTopEdge && !nearBottomEdge) {
+  const atAbsoluteTop = readerState.currentWindowStart === 0 && center <= SHIFT_BUFFER;
+  const atAbsoluteBottom =
+    readerState.currentWindowEnd >= readerState.loadedUntil - 1 &&
+    center >= Math.max(0, readerState.loadedUntil - 1 - SHIFT_BUFFER);
+
+  if (atAbsoluteTop || atAbsoluteBottom) {
     return;
   }
 
-  const next = desiredReaderWindow();
+  if (!nearTop && !nearBottom) {
+    return;
+  }
+
+  const next = computeWindowForCenter(center);
 
   if (
-    next.start === currentWindowStart &&
-    next.end === currentWindowEnd
+    next.start === readerState.currentWindowStart &&
+    next.end === readerState.currentWindowEnd
   ) {
     return;
   }
@@ -471,13 +461,13 @@ function maybeShiftReaderWindow() {
   renderReaderWindow(next.start, next.end);
 }
 
-function queueReaderRefresh() {
-  if (readerState.refreshQueued) return;
-  readerState.refreshQueued = true;
+function onReaderScroll() {
+  if (readerState.scrollTicking) return;
 
+  readerState.scrollTicking = true;
   requestAnimationFrame(() => {
     maybeShiftReaderWindow();
-    readerState.refreshQueued = false;
+    readerState.scrollTicking = false;
   });
 }
 
@@ -491,14 +481,13 @@ function openReader(startIndex = 0) {
     Math.min(startIndex + KEEP_AFTER + 1, state.files.length)
   );
 
-  const initialStart = Math.max(0, readerState.centerIndex - KEEP_BEFORE);
-  const initialEnd = Math.min(readerState.loadedUntil - 1, readerState.centerIndex + KEEP_AFTER);
+  const initialWindow = computeWindowForCenter(startIndex);
 
   els.reader.classList.add("open");
   els.reader.setAttribute("aria-hidden", "false");
   document.body.classList.add("reader-open");
 
-  renderReaderWindow(initialStart, initialEnd);
+  renderReaderWindow(initialWindow.start, initialWindow.end);
 
   requestAnimationFrame(() => {
     const target = document.getElementById(`reader-page-${startIndex}`);
@@ -510,11 +499,6 @@ function openReader(startIndex = 0) {
 
 function closeReader() {
   readerState.open = false;
-
-  if (readerState.readerObserver) {
-    readerState.readerObserver.disconnect();
-  }
-
   els.reader.classList.remove("open");
   els.reader.setAttribute("aria-hidden", "true");
   document.body.classList.remove("reader-open");
@@ -537,6 +521,8 @@ function bindEvents() {
       closeReader();
     }
   });
+
+  els.readerBody.addEventListener("scroll", onReaderScroll, { passive: true });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && readerState.open) {
