@@ -1,0 +1,225 @@
+<#
+R2 schema + links generator
+
+What this does
+--------------
+Scans a local folder and generates a JSON file that includes:
+- links: a flat array of all public file URLs
+- files: a flat array of file objects with name, relative path, and URL
+- tree: a nested folder structure showing what files are where
+
+What it prompts for
+-------------------
+1. Top local directory
+   The folder to scan.
+
+2. Optional subdirectory that maps to the public R2 root
+   Leave blank if the top directory itself is the public root.
+
+3. Public base URL
+   Example:
+   https://pub-45574594fe14428bb489dfce86a05754.r2.dev
+   or
+   https://pub-45574594fe14428bb489dfce86a05754.r2.dev/article_screenshots
+
+4. Output JSON path
+   Press Enter to use ./gallery.json
+
+Quoted input
+------------
+You can paste values with or without wrapping quotes.
+
+Examples:
+"C:\Users\mahan\OneDrive\Desktop\article_screenshots"
+'C:\Users\mahan\OneDrive\Desktop\article_screenshots'
+https://pub-45574594fe14428bb489dfce86a05754.r2.dev
+#>
+
+function Read-CleanInput {
+    param([string]$Prompt)
+
+    $value = Read-Host $Prompt
+
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $value
+    }
+
+    $value = $value.Trim()
+
+    if (
+        ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+        ($value.StartsWith("'") -and $value.EndsWith("'"))
+    ) {
+        if ($value.Length -ge 2) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+    }
+
+    return $value
+}
+
+function Normalize-ForwardSlashes {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
+
+    return ($Path -replace '\\', '/').Trim('/')
+}
+
+function Get-RelativePathSafe {
+    param(
+        [string]$BasePath,
+        [string]$FullPath
+    )
+
+    $baseResolved = (Resolve-Path $BasePath).Path
+    $fullResolved = (Resolve-Path $FullPath).Path
+
+    $baseUri = New-Object System.Uri(($baseResolved.TrimEnd('\') + '\'))
+    $fullUri = New-Object System.Uri($fullResolved)
+
+    $relative = $baseUri.MakeRelativeUri($fullUri).ToString()
+    return [System.Uri]::UnescapeDataString($relative) -replace '\\', '/'
+}
+
+function Encode-UrlPathSegments {
+    param([string]$RelativePath)
+
+    $normalized = Normalize-ForwardSlashes $RelativePath
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return ""
+    }
+
+    $segments = $normalized.Split('/')
+    $encodedSegments = foreach ($segment in $segments) {
+        [System.Uri]::EscapeDataString($segment)
+    }
+
+    return ($encodedSegments -join '/')
+}
+
+function Add-FileToTree {
+    param(
+        [hashtable]$Tree,
+        [string[]]$Parts,
+        [hashtable]$FileEntry
+    )
+
+    if ($Parts.Count -eq 0) {
+        if (-not $Tree.ContainsKey("_files")) {
+            $Tree["_files"] = @()
+        }
+        $Tree["_files"] += [pscustomobject]$FileEntry
+        return
+    }
+
+    $head = $Parts[0]
+    $rest = @()
+
+    if ($Parts.Count -gt 1) {
+        $rest = $Parts[1..($Parts.Count - 1)]
+    }
+
+    if (-not $Tree.ContainsKey($head)) {
+        $Tree[$head] = @{}
+    }
+
+    Add-FileToTree -Tree $Tree[$head] -Parts $rest -FileEntry $FileEntry
+}
+
+Write-Host ""
+Write-Host "R2 Gallery JSON Builder"
+Write-Host "-----------------------"
+Write-Host ""
+
+$topDirectory = Read-CleanInput "1) Enter top local directory"
+if ([string]::IsNullOrWhiteSpace($topDirectory)) {
+    Write-Error "Top local directory is required."
+    exit 1
+}
+
+if (-not (Test-Path $topDirectory -PathType Container)) {
+    Write-Error "Top directory does not exist or is not a folder: $topDirectory"
+    exit 1
+}
+
+$resolvedTop = (Resolve-Path $topDirectory).Path
+
+$r2RootLocal = Normalize-ForwardSlashes (Read-CleanInput "2) Enter subdirectory that maps to R2 root (leave blank if top directory itself is the root)")
+
+if ([string]::IsNullOrWhiteSpace($r2RootLocal)) {
+    $r2RootFull = $resolvedTop
+}
+else {
+    $r2RootFull = Join-Path $resolvedTop ($r2RootLocal -replace '/', '\')
+}
+
+if (-not (Test-Path $r2RootFull -PathType Container)) {
+    Write-Error "R2 root folder not found: $r2RootFull"
+    exit 1
+}
+
+$publicBaseUrl = Read-CleanInput "3) Enter public base URL"
+if ([string]::IsNullOrWhiteSpace($publicBaseUrl)) {
+    Write-Error "Public base URL is required."
+    exit 1
+}
+$publicBaseUrl = $publicBaseUrl.Trim().TrimEnd('/')
+
+$outputFile = Read-CleanInput "4) Output JSON path (press Enter for ./gallery.json)"
+if ([string]::IsNullOrWhiteSpace($outputFile)) {
+    $outputFile = Join-Path (Get-Location) "gallery.json"
+}
+
+$allFiles = Get-ChildItem -Path $r2RootFull -Recurse -File | Sort-Object FullName
+
+$links = New-Object System.Collections.Generic.List[string]
+$fileObjects = New-Object System.Collections.Generic.List[object]
+$tree = @{}
+
+foreach ($file in $allFiles) {
+    $relativeFromRoot = Get-RelativePathSafe -BasePath $r2RootFull -FullPath $file.FullName
+    $encodedPath = Encode-UrlPathSegments $relativeFromRoot
+    $publicUrl = "$publicBaseUrl/$encodedPath"
+
+    $entry = [ordered]@{
+        name = $file.Name
+        path = $relativeFromRoot
+        url  = $publicUrl
+    }
+
+    $links.Add($publicUrl)
+    $fileObjects.Add([pscustomobject]$entry)
+
+    $dirRelative = Split-Path $relativeFromRoot -Parent
+    if ([string]::IsNullOrWhiteSpace($dirRelative) -or $dirRelative -eq ".") {
+        $parts = @()
+    }
+    else {
+        $parts = (Normalize-ForwardSlashes $dirRelative).Split('/')
+    }
+
+    Add-FileToTree -Tree $tree -Parts $parts -FileEntry $entry
+}
+
+$result = [ordered]@{
+    generated_utc   = (Get-Date).ToUniversalTime().ToString("o")
+    top_directory   = $resolvedTop
+    local_r2_root   = $r2RootFull
+    public_base_url = $publicBaseUrl
+    total_files     = $fileObjects.Count
+    links           = $links
+    files           = $fileObjects
+    tree            = $tree
+}
+
+$result | ConvertTo-Json -Depth 100 | Set-Content -Path $outputFile -Encoding UTF8
+Start-Process notepad.exe $outputFile
+
+Write-Host ""
+Write-Host "Done."
+Write-Host "JSON written to: $outputFile"
+Write-Host "Files indexed: $($fileObjects.Count)"
+Write-Host ""
