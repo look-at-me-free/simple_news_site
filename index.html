@@ -3,42 +3,39 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mass Movement Archive</title>
+  <title>Archive Reader</title>
   <meta name="color-scheme" content="dark" />
   <style>
     :root {
-      --bg: #0a0a0f;
-      --bg-elev: rgba(255, 255, 255, 0.04);
-      --bg-elev-2: rgba(255, 255, 255, 0.07);
+      --bg: #0b0d12;
+      --bg2: #111520;
+      --panel: rgba(255,255,255,0.05);
+      --panel-2: rgba(255,255,255,0.07);
+      --line: rgba(255,255,255,0.09);
       --text: #f5f7fb;
-      --muted: #9aa3b2;
-      --line: rgba(255, 255, 255, 0.08);
-      --accent: #7c9cff;
-      --accent-2: #9b7cff;
-      --shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+      --muted: #9da7b7;
+      --accent: #88a2ff;
+      --shadow: 0 10px 40px rgba(0,0,0,0.35);
       --radius: 22px;
       --radius-sm: 16px;
-      --max-width: 1400px;
-      --thumb-aspect: 3 / 4;
+      --max: 1440px;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     html, body {
       margin: 0;
       padding: 0;
       min-height: 100%;
       background:
-        radial-gradient(circle at top left, rgba(124, 156, 255, 0.13), transparent 28%),
-        radial-gradient(circle at top right, rgba(155, 124, 255, 0.11), transparent 24%),
-        linear-gradient(180deg, #0a0a0f 0%, #0d1017 100%);
+        radial-gradient(circle at top left, rgba(136,162,255,0.12), transparent 24%),
+        radial-gradient(circle at top right, rgba(155,124,255,0.09), transparent 20%),
+        linear-gradient(180deg, var(--bg) 0%, #0e121a 100%);
       color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
-    body.modal-open {
+    body.reader-open {
       overflow: hidden;
     }
 
@@ -49,101 +46,85 @@
 
     button {
       font: inherit;
-    }
-
-    .site-shell {
-      width: min(100%, var(--max-width));
-      margin: 0 auto;
-      padding: 24px 18px 60px;
+      color: inherit;
     }
 
     .topbar {
       position: sticky;
       top: 0;
-      z-index: 40;
+      z-index: 50;
       backdrop-filter: blur(18px);
-      background: rgba(10, 10, 15, 0.7);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(10, 12, 18, 0.72);
+      border-bottom: 1px solid var(--line);
     }
 
     .topbar-inner {
-      width: min(100%, var(--max-width));
+      width: min(100%, var(--max));
       margin: 0 auto;
       padding: 16px 18px;
       display: flex;
-      align-items: center;
       justify-content: space-between;
+      align-items: center;
       gap: 18px;
-    }
-
-    .brand {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
+      flex-wrap: wrap;
     }
 
     .brand-title {
-      font-size: clamp(20px, 3vw, 32px);
-      font-weight: 800;
-      letter-spacing: -0.03em;
+      font-size: clamp(22px, 4vw, 34px);
       line-height: 1;
+      letter-spacing: -0.04em;
+      font-weight: 900;
     }
 
     .brand-subtitle {
+      margin-top: 6px;
       color: var(--muted);
       font-size: 13px;
     }
 
     .toolbar {
       display: flex;
-      align-items: center;
       gap: 10px;
+      align-items: center;
       flex-wrap: wrap;
     }
 
-    .select-wrap {
-      position: relative;
-    }
-
-    .gallery-select {
-      appearance: none;
+    .button {
       border: 1px solid var(--line);
-      background: var(--bg-elev);
-      color: var(--text);
+      background: var(--panel);
       border-radius: 14px;
-      padding: 12px 42px 12px 14px;
-      min-width: 240px;
-      outline: none;
-      box-shadow: var(--shadow);
+      padding: 11px 14px;
+      cursor: pointer;
+      transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
     }
 
-    .select-wrap::after {
-      content: "▾";
-      position: absolute;
-      right: 14px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--muted);
-      pointer-events: none;
-      font-size: 12px;
+    .button:hover {
+      transform: translateY(-1px);
+      background: var(--panel-2);
+      border-color: rgba(136,162,255,0.3);
+    }
+
+    .shell {
+      width: min(100%, var(--max));
+      margin: 0 auto;
+      padding: 24px 18px 64px;
     }
 
     .hero {
       display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
+      grid-template-columns: 1.3fr 0.7fr;
       gap: 18px;
-      margin: 26px 0 22px;
+      margin-bottom: 24px;
     }
 
     .panel {
-      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
       border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
 
-    .hero-main,
-    .hero-side {
+    .hero-main, .hero-side {
       padding: 22px;
     }
 
@@ -151,14 +132,14 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      color: #dbe4ff;
+      background: rgba(136,162,255,0.12);
+      border: 1px solid rgba(136,162,255,0.22);
+      color: #dde6ff;
+      border-radius: 999px;
+      padding: 8px 12px;
       font-size: 12px;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      background: rgba(124, 156, 255, 0.12);
-      border: 1px solid rgba(124, 156, 255, 0.22);
-      border-radius: 999px;
-      padding: 8px 12px;
       margin-bottom: 14px;
     }
 
@@ -174,7 +155,7 @@
       margin: 14px 0 0;
       color: var(--muted);
       font-size: 15px;
-      line-height: 1.6;
+      line-height: 1.65;
       max-width: 62ch;
     }
 
@@ -182,13 +163,12 @@
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
-      margin-top: 20px;
     }
 
     .stat {
       background: rgba(255,255,255,0.035);
       border: 1px solid var(--line);
-      border-radius: 16px;
+      border-radius: 18px;
       padding: 14px;
     }
 
@@ -200,124 +180,76 @@
 
     .stat-value {
       font-size: 24px;
-      font-weight: 800;
+      font-weight: 850;
       letter-spacing: -0.03em;
     }
 
-    .gallery-grid-title {
-      margin: 28px 0 16px;
-      font-size: 20px;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-    }
-
-    .gallery-cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 16px;
-      margin-bottom: 26px;
-    }
-
-    .gallery-card {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      padding: 16px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
-      border: 1px solid var(--line);
-      border-radius: 20px;
-      box-shadow: var(--shadow);
-      transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
-      cursor: pointer;
-    }
-
-    .gallery-card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(124, 156, 255, 0.35);
-      background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.04));
-    }
-
-    .gallery-card.active {
-      border-color: rgba(124, 156, 255, 0.45);
-      box-shadow:
-        0 10px 40px rgba(0,0,0,0.35),
-        0 0 0 1px rgba(124, 156, 255, 0.22) inset;
-    }
-
-    .gallery-card-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 14px;
-      align-items: flex-start;
-    }
-
-    .gallery-card-title {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 800;
-      line-height: 1.1;
-      letter-spacing: -0.03em;
-    }
-
-    .gallery-card-meta {
-      color: var(--muted);
-      font-size: 13px;
-      margin-top: 6px;
-    }
-
-    .pill {
-      flex-shrink: 0;
-      background: rgba(124, 156, 255, 0.12);
-      border: 1px solid rgba(124, 156, 255, 0.24);
-      color: #dbe4ff;
-      border-radius: 999px;
-      font-size: 12px;
-      padding: 8px 10px;
-      white-space: nowrap;
-    }
-
-    .gallery-card-footer {
-      color: var(--muted);
-      font-size: 12px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .section-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: end;
-      gap: 16px;
-      margin: 26px 0 18px;
-    }
-
-    .section-head h2 {
-      margin: 0;
+    .section-title {
+      margin: 26px 0 14px;
       font-size: clamp(22px, 4vw, 34px);
       line-height: 1;
       letter-spacing: -0.04em;
+      font-weight: 900;
     }
 
-    .section-head p {
-      margin: 8px 0 0;
+    .section-subtitle {
       color: var(--muted);
+      margin: 0 0 20px;
       font-size: 14px;
     }
 
-    .reader-btn {
-      border: 1px solid rgba(124, 156, 255, 0.28);
-      background: linear-gradient(180deg, rgba(124, 156, 255, 0.16), rgba(124, 156, 255, 0.1));
-      color: var(--text);
-      padding: 12px 16px;
-      border-radius: 14px;
-      cursor: pointer;
-      transition: transform 160ms ease, opacity 160ms ease;
+    .group-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 22px;
     }
 
-    .reader-btn:hover {
+    .group-chip {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--text);
+      cursor: pointer;
+      transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+    }
+
+    .group-chip:hover {
       transform: translateY(-1px);
-      opacity: 0.95;
+      background: var(--panel-2);
+      border-color: rgba(136,162,255,0.3);
+    }
+
+    .groups {
+      display: grid;
+      gap: 28px;
+    }
+
+    .group-section {
+      scroll-margin-top: 96px;
+    }
+
+    .group-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .group-title {
+      margin: 0;
+      font-size: clamp(20px, 3vw, 30px);
+      line-height: 1;
+      letter-spacing: -0.04em;
+      font-weight: 850;
+    }
+
+    .group-meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
     }
 
     .thumb-grid {
@@ -328,32 +260,31 @@
 
     .thumb-card {
       position: relative;
-      overflow: hidden;
-      border-radius: 18px;
-      background: var(--bg-elev);
       border: 1px solid var(--line);
+      background: rgba(255,255,255,0.035);
+      border-radius: 20px;
+      overflow: hidden;
       box-shadow: var(--shadow);
       cursor: pointer;
-      transition: transform 180ms ease, border-color 180ms ease;
+      transition: transform 160ms ease, border-color 160ms ease;
     }
 
     .thumb-card:hover {
       transform: translateY(-4px);
-      border-color: rgba(124, 156, 255, 0.35);
+      border-color: rgba(136,162,255,0.34);
     }
 
     .thumb-media {
-      aspect-ratio: var(--thumb-aspect);
+      aspect-ratio: 3 / 4;
+      background: #07090d;
       overflow: hidden;
-      background: #07080c;
     }
 
     .thumb-media img {
       width: 100%;
       height: 100%;
-      object-fit: cover;
       display: block;
-      filter: saturate(1.03) contrast(1.02);
+      object-fit: cover;
       transition: transform 220ms ease;
     }
 
@@ -365,36 +296,31 @@
       position: absolute;
       inset: auto 0 0 0;
       padding: 12px;
-      background: linear-gradient(180deg, transparent, rgba(0,0,0,0.75));
+      background: linear-gradient(180deg, transparent, rgba(0,0,0,0.78));
       display: flex;
       justify-content: space-between;
       align-items: end;
-      gap: 12px;
+      gap: 10px;
+    }
+
+    .thumb-index,
+    .thumb-cta {
+      font-size: 12px;
+      color: #eef2fb;
     }
 
     .thumb-index {
-      font-size: 12px;
-      color: #e4e9f5;
-      background: rgba(255,255,255,0.12);
-      border: 1px solid rgba(255,255,255,0.12);
       padding: 6px 8px;
       border-radius: 999px;
-      backdrop-filter: blur(6px);
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.12);
     }
 
-    .thumb-open {
-      color: #fff;
-      font-size: 12px;
-      opacity: 0.92;
-    }
-
-    .empty-state,
-    .loading-state,
-    .error-state {
-      padding: 28px 22px;
-      border: 1px solid var(--line);
-      background: var(--bg-elev);
+    .state-box {
+      padding: 24px;
       border-radius: 20px;
+      border: 1px solid var(--line);
+      background: var(--panel);
       color: var(--muted);
       box-shadow: var(--shadow);
     }
@@ -404,7 +330,7 @@
       inset: 0;
       z-index: 999;
       display: none;
-      background: rgba(4, 6, 12, 0.82);
+      background: rgba(5, 7, 12, 0.82);
       backdrop-filter: blur(16px);
     }
 
@@ -426,22 +352,15 @@
       gap: 16px;
       padding: 14px 18px;
       border-bottom: 1px solid rgba(255,255,255,0.08);
-      background: rgba(10,10,16,0.72);
+      background: rgba(11, 13, 18, 0.78);
       backdrop-filter: blur(18px);
-    }
-
-    .reader-title-wrap {
-      min-width: 0;
     }
 
     .reader-title {
       margin: 0;
       font-size: 18px;
-      font-weight: 800;
+      font-weight: 850;
       letter-spacing: -0.03em;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
 
     .reader-subtitle {
@@ -452,28 +371,18 @@
 
     .reader-actions {
       display: flex;
-      align-items: center;
       gap: 10px;
       flex-wrap: wrap;
     }
 
-    .reader-action {
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.05);
-      color: var(--text);
-      border-radius: 12px;
-      padding: 10px 12px;
-      cursor: pointer;
-    }
-
     .reader-body {
       overflow-y: auto;
-      padding: 22px;
+      padding: 20px;
       scroll-behavior: smooth;
     }
 
     .reader-stack {
-      width: min(100%, 1080px);
+      width: min(100%, 1100px);
       margin: 0 auto;
       display: grid;
       gap: 18px;
@@ -498,45 +407,51 @@
 
     .reader-page-meta {
       padding: 10px 14px;
+      border-top: 1px solid rgba(255,255,255,0.06);
       color: var(--muted);
       font-size: 12px;
-      border-top: 1px solid rgba(255,255,255,0.06);
       background: rgba(255,255,255,0.02);
+    }
+
+    .reader-spacer {
+      width: 100%;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.015);
+      border: 1px dashed rgba(255,255,255,0.04);
+    }
+
+    .keep-reading-wrap {
+      display: flex;
+      justify-content: center;
+      padding-top: 6px;
+    }
+
+    .keep-reading {
+      border: 1px solid rgba(136,162,255,0.24);
+      background: linear-gradient(180deg, rgba(136,162,255,0.14), rgba(136,162,255,0.08));
+      color: var(--text);
+      border-radius: 999px;
+      padding: 12px 18px;
+      cursor: pointer;
+      box-shadow: var(--shadow);
     }
 
     @media (max-width: 920px) {
       .hero {
         grid-template-columns: 1fr;
       }
-
-      .topbar-inner {
-        flex-direction: column;
-        align-items: stretch;
-      }
-
-      .toolbar {
-        justify-content: stretch;
-      }
-
-      .gallery-select {
-        width: 100%;
-      }
-
-      .section-head {
-        flex-direction: column;
-        align-items: stretch;
-      }
     }
 
     @media (max-width: 640px) {
-      .site-shell {
+      .shell {
         padding-left: 14px;
         padding-right: 14px;
       }
 
-      .hero-main,
-      .hero-side {
-        padding: 18px;
+      .topbar-inner,
+      .reader-topbar {
+        padding-left: 14px;
+        padding-right: 14px;
       }
 
       .thumb-grid {
@@ -547,84 +462,67 @@
       .reader-body {
         padding: 14px;
       }
-
-      .reader-topbar {
-        padding: 12px 14px;
-      }
     }
   </style>
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand">
-        <div class="brand-title">Mass Movement Archive</div>
-        <div class="brand-subtitle">Auto-built from uploaded JSON galleries</div>
+      <div>
+        <div class="brand-title">Archive Reader</div>
+        <div class="brand-subtitle">Directory-grouped image archive with a windowed long-scroll reader</div>
       </div>
 
       <div class="toolbar">
-        <div class="select-wrap">
-          <select id="gallerySelect" class="gallery-select">
-            <option value="">Loading galleries...</option>
-          </select>
-        </div>
+        <button id="openReaderFromTop" class="button" type="button">Open reader from top</button>
       </div>
     </div>
   </header>
 
-  <main class="site-shell">
+  <main class="shell">
     <section class="hero">
       <div class="panel hero-main">
-        <div class="kicker">Live archive interface</div>
-        <h1 class="hero-title" id="heroTitle">Loading archive...</h1>
-        <p class="hero-text" id="heroText">
-          Pulling gallery data from the generated index.
-        </p>
+        <div class="kicker">Live archive</div>
+        <h1 id="heroTitle" class="hero-title">Loading archive...</h1>
+        <p id="heroText" class="hero-text">Reading the source JSON and building sections from directory names.</p>
       </div>
 
       <div class="panel hero-side">
         <div class="stats">
           <div class="stat">
-            <div class="stat-label">Galleries</div>
-            <div class="stat-value" id="galleryCount">0</div>
+            <div class="stat-label">Directory groups</div>
+            <div id="groupCount" class="stat-value">0</div>
           </div>
           <div class="stat">
-            <div class="stat-label">Images in view</div>
-            <div class="stat-value" id="imageCount">0</div>
+            <div class="stat-label">Total images</div>
+            <div id="imageCount" class="stat-value">0</div>
           </div>
         </div>
       </div>
     </section>
 
     <section>
-      <div class="gallery-grid-title">Available galleries</div>
-      <div id="galleryCards" class="gallery-cards"></div>
+      <h2 class="section-title">Sections</h2>
+      <p class="section-subtitle">Each header comes from the first directory in <code>files[].path</code>.</p>
+      <div id="groupNav" class="group-nav"></div>
     </section>
 
     <section>
-      <div class="section-head">
-        <div>
-          <h2 id="activeGalleryTitle">Gallery</h2>
-          <p id="activeGalleryMeta">Choose a gallery to begin.</p>
-        </div>
-        <button id="openReaderTop" class="reader-btn" type="button">Open scroll reader</button>
-      </div>
-
-      <div id="imageGridContainer"></div>
+      <div id="groupsContainer" class="groups"></div>
     </section>
   </main>
 
   <div id="reader" class="reader" aria-hidden="true">
     <div class="reader-shell">
       <div class="reader-topbar">
-        <div class="reader-title-wrap">
-          <div class="reader-title" id="readerTitle">Reader</div>
-          <div class="reader-subtitle" id="readerSubtitle">0 images</div>
+        <div>
+          <div id="readerTitle" class="reader-title">Reader</div>
+          <div id="readerSubtitle" class="reader-subtitle">0 images</div>
         </div>
 
         <div class="reader-actions">
-          <button id="jumpToTopBtn" class="reader-action" type="button">Top</button>
-          <button id="closeReaderBtn" class="reader-action" type="button">Close</button>
+          <button id="readerTopBtn" class="button" type="button">Top</button>
+          <button id="closeReaderBtn" class="button" type="button">Close</button>
         </div>
       </div>
 
