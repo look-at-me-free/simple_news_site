@@ -1,0 +1,64 @@
+/* ============================
+   GLOBAL
+============================ */
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  color: #fff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* ============================
+   GALLERY
+============================ */
+#gallery {
+  width: 100%;
+}
+
+/* ============================
+   PAGE (each screenshot)
+============================ */
+.page {
+  width: 100%;
+  min-height: 100vh;
+  background: #000;
+
+  display: flex;
+  justify-content: center;
+  align-items: flex-start; /* TOP alignment is key */
+}
+
+/* spacing between pages */
+.page + .page {
+  margin-top: 24px;
+}
+
+/* ============================
+   VIEWER
+============================ */
+.viewer {
+  width: 100%;
+  max-width: 1200px; /* keeps readability sane */
+  background: #000;
+  position: relative;
+}
+
+/* ============================
+   IMAGE
+============================ */
+.viewer img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* ============================
+   LOADING / FALLBACK
+============================ */
+.loading {
+  padding: 40px;
+  text-align: center;
+  color: #777;
+  font-size: 14px;
+}
