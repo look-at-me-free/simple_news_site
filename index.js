@@ -1,4 +1,4 @@
-const DATA_URL = "./uploaded_directories/archive.json"; // change this to your JSON file
+const DATA_URL = "./generated/gallery-index.json";
 
 const INITIAL_LOAD = 20;
 const LOAD_STEP = 20;
@@ -9,9 +9,10 @@ const READER_ROOT_MARGIN = "1200px";
 
 const state = {
   data: null,
+  galleries: [],
   groups: [],
   files: [],
-  globalIndexByUrl: new Map()
+  sourceTitle: "Archive"
 };
 
 const readerState = {
@@ -20,7 +21,7 @@ const readerState = {
   centerIndex: 0,
   heights: new Map(),
   thumbObserver: null,
-  readerImgObserver: null,
+  readerObserver: null,
   refreshQueued: false
 };
 
@@ -68,50 +69,77 @@ async function loadJson(url) {
   return response.json();
 }
 
-function topDirFromPath(filePath) {
-  if (!filePath || typeof filePath !== "string") return "Misc";
-  const normalized = filePath.replace(/\\/g, "/").trim();
-  const parts = normalized.split("/").filter(Boolean);
-  return parts[0] || "Misc";
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
-function buildGroupsFromJson(data) {
-  if (data.tree && typeof data.tree === "object" && !Array.isArray(data.tree)) {
-    const groups = Object.entries(data.tree).map(([title, node]) => ({
-      title,
-      items: Array.isArray(node?._files) ? node._files.slice() : []
-    }));
+function titleCaseSlug(value) {
+  return String(value)
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
-    groups.sort((a, b) => a.title.localeCompare(b.title));
-    return groups;
-  }
+function extractGroupFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
 
-  const grouped = new Map();
-  const files = Array.isArray(data.files) ? data.files : [];
+    if (!segments.length) return "Misc";
 
-  for (const file of files) {
-    const title = topDirFromPath(file.path);
-
-    if (!grouped.has(title)) {
-      grouped.set(title, []);
+    // For your structure:
+    // /article_screenshots/Before%20Mass%20Media/file.png
+    // group is the second-to-last directory component after root folder
+    if (segments.length >= 2) {
+      const group = segments[segments.length - 2];
+      return safeDecode(group);
     }
 
-    grouped.get(title).push(file);
+    return safeDecode(segments[0]);
+  } catch {
+    const cleaned = String(url).split("?")[0].split("#")[0];
+    const parts = cleaned.split("/").filter(Boolean);
+    if (parts.length >= 2) {
+      return safeDecode(parts[parts.length - 2]);
+    }
+    return "Misc";
   }
-
-  return Array.from(grouped.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([title, items]) => ({ title, items }));
 }
 
-function flattenGroups(groups) {
+function fileNameFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    return safeDecode(segments[segments.length - 1] || "image");
+  } catch {
+    const cleaned = String(url).split("?")[0].split("#")[0];
+    const parts = cleaned.split("/").filter(Boolean);
+    return safeDecode(parts[parts.length - 1] || "image");
+  }
+}
+
+function buildFlatFilesFromGenerated(data) {
+  const galleries = Array.isArray(data.galleries) ? data.galleries : [];
   const flat = [];
 
-  for (const group of groups) {
-    for (const item of group.items) {
+  for (const gallery of galleries) {
+    const galleryTitle = gallery.title || titleCaseSlug(gallery.slug || "Gallery");
+    const links = Array.isArray(gallery.links) ? gallery.links : [];
+
+    for (const url of links) {
       flat.push({
-        ...item,
-        groupTitle: group.title
+        url,
+        name: fileNameFromUrl(url),
+        groupTitle: extractGroupFromUrl(url),
+        galleryTitle,
+        gallerySlug: gallery.slug || "",
+        source: gallery.source || "",
+        generatedFromFilename: gallery.generated_from_filename || ""
       });
     }
   }
@@ -119,19 +147,26 @@ function flattenGroups(groups) {
   return flat;
 }
 
-function buildGlobalIndexMap(files) {
+function groupFiles(files) {
   const map = new Map();
-  files.forEach((file, index) => {
-    map.set(file.url, index);
-  });
-  return map;
+
+  for (const file of files) {
+    const key = file.groupTitle || "Misc";
+    if (!map.has(key)) {
+      map.set(key, []);
+    }
+    map.get(key).push(file);
+  }
+
+  return Array.from(map.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([title, items]) => ({ title, items }));
 }
 
 function renderHero() {
-  els.heroTitle.textContent = "Archive ready";
+  els.heroTitle.textContent = state.sourceTitle;
   els.heroText.textContent =
-    "Sections are derived directly from the first directory in files[].path. " +
-    "Thumbnails lazy-load, and the reader uses a sliding window so the browser does not have to keep the whole stack live at once.";
+    "Loaded from generated/gallery-index.json. Sections are inferred from the directory names inside each image URL, and the reader uses a sliding window so the browser does not have to keep the full stack live.";
 
   els.groupCount.textContent = String(state.groups.length);
   els.imageCount.textContent = String(state.files.length);
@@ -139,15 +174,15 @@ function renderHero() {
 
 function renderGroupNav() {
   if (!state.groups.length) {
-    els.groupNav.innerHTML = `<div class="state-box">No directory groups found.</div>`;
+    els.groupNav.innerHTML = `<div class="state-box">No sections found.</div>`;
     return;
   }
 
   els.groupNav.innerHTML = state.groups
     .map((group, index) => {
-      const anchorId = `group-${index}`;
+      const targetId = `group-${index}`;
       return `
-        <button class="group-chip" type="button" data-target="${escapeHtml(anchorId)}">
+        <button class="group-chip" type="button" data-target="${escapeHtml(targetId)}">
           ${escapeHtml(group.title)} (${group.items.length})
         </button>
       `;
@@ -191,15 +226,14 @@ function createThumbObserver() {
 
 function observeThumbs() {
   createThumbObserver();
-
-  document.querySelectorAll("img[data-src].thumb-lazy").forEach((img) => {
+  document.querySelectorAll("img.thumb-lazy[data-src]").forEach((img) => {
     readerState.thumbObserver.observe(img);
   });
 }
 
 function renderGroups() {
   if (!state.groups.length) {
-    els.groupsContainer.innerHTML = `<div class="state-box">No images found in the supplied JSON.</div>`;
+    els.groupsContainer.innerHTML = `<div class="state-box">No images found in generated/gallery-index.json.</div>`;
     return;
   }
 
@@ -219,14 +253,15 @@ function renderGroups() {
           <div class="thumb-grid">
             ${group.items
               .map((file) => {
-                const globalIndex = state.globalIndexByUrl.get(file.url);
+                const globalIndex = state.files.indexOf(file);
+
                 return `
                   <button class="thumb-card" type="button" data-open-index="${globalIndex}">
                     <div class="thumb-media">
                       <img
                         class="thumb-lazy"
                         data-src="${escapeHtml(file.url)}"
-                        alt="${escapeHtml(file.name || group.title)}"
+                        alt="${escapeHtml(file.name)}"
                         loading="lazy"
                         decoding="async"
                       />
@@ -249,14 +284,13 @@ function renderGroups() {
 
   els.groupsContainer.querySelectorAll("[data-open-index]").forEach((button) => {
     button.addEventListener("click", () => {
-      const index = Number(button.dataset.openIndex);
-      openReader(index);
+      openReader(Number(button.dataset.openIndex));
     });
   });
 }
 
 function updateReaderHeader() {
-  els.readerTitle.textContent = "Reader";
+  els.readerTitle.textContent = state.sourceTitle;
   els.readerSubtitle.textContent = `${readerState.loadedUntil} loaded · ${state.files.length} total`;
 }
 
@@ -281,7 +315,7 @@ function makeReaderPage(index, file) {
 
   const meta = document.createElement("div");
   meta.className = "reader-page-meta";
-  meta.textContent = `${file.groupTitle || topDirFromPath(file.path)} · Page ${index + 1} of ${state.files.length}`;
+  meta.textContent = `${file.groupTitle} · Page ${index + 1} of ${state.files.length}`;
 
   page.appendChild(img);
   page.appendChild(meta);
@@ -296,12 +330,12 @@ function makeSpacer(index) {
   return spacer;
 }
 
-function createReaderImgObserver() {
-  if (readerState.readerImgObserver) {
-    readerState.readerImgObserver.disconnect();
+function createReaderObserver() {
+  if (readerState.readerObserver) {
+    readerState.readerObserver.disconnect();
   }
 
-  readerState.readerImgObserver = new IntersectionObserver(
+  readerState.readerObserver = new IntersectionObserver(
     (entries) => {
       let bestIndex = readerState.centerIndex;
       let bestRatio = 0;
@@ -339,10 +373,10 @@ function createReaderImgObserver() {
 }
 
 function observeReaderImages() {
-  createReaderImgObserver();
+  createReaderObserver();
 
   els.readerStack.querySelectorAll(".reader-page img[data-src]").forEach((img) => {
-    readerState.readerImgObserver.observe(img);
+    readerState.readerObserver.observe(img);
   });
 }
 
@@ -378,7 +412,7 @@ function buildKeepReadingButton() {
 }
 
 function renderReaderWindow() {
-  const prevScrollTop = els.readerBody.scrollTop;
+  const previousScrollTop = els.readerBody.scrollTop;
   const { start, end } = currentReaderWindow();
 
   const fragment = document.createDocumentFragment();
@@ -402,7 +436,7 @@ function renderReaderWindow() {
   updateReaderHeader();
   observeReaderImages();
 
-  els.readerBody.scrollTop = prevScrollTop;
+  els.readerBody.scrollTop = previousScrollTop;
 }
 
 function queueReaderRefresh() {
@@ -442,8 +476,8 @@ function openReader(startIndex = 0) {
 function closeReader() {
   readerState.open = false;
 
-  if (readerState.readerImgObserver) {
-    readerState.readerImgObserver.disconnect();
+  if (readerState.readerObserver) {
+    readerState.readerObserver.disconnect();
   }
 
   els.reader.classList.remove("open");
@@ -457,9 +491,7 @@ function bindEvents() {
     openReader(0);
   });
 
-  els.closeReaderBtn.addEventListener("click", () => {
-    closeReader();
-  });
+  els.closeReaderBtn.addEventListener("click", closeReader);
 
   els.readerTopBtn.addEventListener("click", () => {
     els.readerBody.scrollTo({ top: 0, behavior: "smooth" });
@@ -481,10 +513,10 @@ function bindEvents() {
 function renderError(message) {
   els.heroTitle.textContent = "Could not load archive";
   els.heroText.textContent = message;
-  els.groupNav.innerHTML = "";
-  els.groupsContainer.innerHTML = `<div class="state-box">${escapeHtml(message)}</div>`;
   els.groupCount.textContent = "0";
   els.imageCount.textContent = "0";
+  els.groupNav.innerHTML = "";
+  els.groupsContainer.innerHTML = `<div class="state-box">${escapeHtml(message)}</div>`;
 }
 
 async function init() {
@@ -492,9 +524,17 @@ async function init() {
     els.groupsContainer.innerHTML = `<div class="state-box">Loading archive...</div>`;
 
     state.data = await loadJson(DATA_URL);
-    state.groups = buildGroupsFromJson(state.data);
-    state.files = flattenGroups(state.groups);
-    state.globalIndexByUrl = buildGlobalIndexMap(state.files);
+    state.galleries = Array.isArray(state.data.galleries) ? state.data.galleries : [];
+    state.files = buildFlatFilesFromGenerated(state.data);
+    state.groups = groupFiles(state.files);
+
+    if (state.galleries.length === 1) {
+      state.sourceTitle = state.galleries[0].title || "Archive";
+    } else if (state.galleries.length > 1) {
+      state.sourceTitle = "Combined Archive";
+    } else {
+      state.sourceTitle = "Archive";
+    }
 
     renderHero();
     renderGroupNav();
